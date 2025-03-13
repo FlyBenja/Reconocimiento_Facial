@@ -4,18 +4,16 @@ import json
 import threading
 import face_recognition
 import os
-import numpy as np
 
 # Configuración de la API de Azure
 FACE_API_ENDPOINT = "https://visioface.cognitiveservices.azure.com/face/v1.0/detect?returnFaceRectangle=true"
 FACE_API_KEY = "6mwoycYwFGNTe7n04RKJaI5ca3hRJcUJWif7Z3uj9IckkxMUShSgJQQJ99BCACYeBjFXJ3w3AAAKACOGR26G"
-
 HEADERS = {
     'Ocp-Apim-Subscription-Key': FACE_API_KEY,
     'Content-Type': 'application/octet-stream'
 }
 
-# Cargar imágenes de la carpeta 'Data/Imagenes' y codificarlas
+# Cargar imágenes conocidas y codificarlas
 def load_known_faces(known_faces_folder="Data/Imagenes"):
     known_face_encodings = []
     known_face_names = []
@@ -27,34 +25,46 @@ def load_known_faces(known_faces_folder="Data/Imagenes"):
             encoding = face_recognition.face_encodings(image)
             if encoding:
                 known_face_encodings.append(encoding[0])
-                known_face_names.append(filename)  # Usamos el nombre del archivo como el nombre de la persona
+                # Guardamos solo el nombre del archivo sin la extensión
+                known_face_names.append(os.path.splitext(filename)[0])  
 
     return known_face_encodings, known_face_names
 
 # Función para detectar rostros en un hilo separado
 def detect_faces(frame, results, known_face_encodings, known_face_names):
     try:
-        # Obtener la codificación de las caras en el frame actual
-        rgb_frame = frame[:, :, ::-1]  # Convertir de BGR a RGB
-        face_locations = face_recognition.face_locations(rgb_frame)
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        _, img_encoded = cv2.imencode('.jpg', frame)  
+        response = requests.post(FACE_API_ENDPOINT, headers=HEADERS, data=img_encoded.tobytes())
+        
+        if response.status_code == 200:
+            faces = response.json()
+            results.clear()
+            for face in faces:
+                # Obtener el rostro y compararlo con los rostros conocidos
+                face_rectangle = face['faceRectangle']
+                face_image = frame[face_rectangle['top']:face_rectangle['top'] + face_rectangle['height'],
+                                   face_rectangle['left']:face_rectangle['left'] + face_rectangle['width']]
+                rgb_face = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
+                face_encoding = face_recognition.face_encodings(rgb_face)
 
-        results.clear()  # Limpiar resultados previos
+                if face_encoding:
+                    matches = face_recognition.compare_faces(known_face_encodings, face_encoding[0])
+                    name = "Desconocido"
+                    match_percentage = 0.0
 
-        for face_encoding, face_location in zip(face_encodings, face_locations):
-            # Comparar la cara detectada con las caras conocidas
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            name = "Desconocido"
-            
-            if True in matches:
-                first_match_index = matches.index(True)
-                name = known_face_names[first_match_index]
-            
-            results.append({
-                "name": name,
-                "location": face_location
-            })
+                    if True in matches:
+                        first_match_index = matches.index(True)
+                        name = known_face_names[first_match_index]
+                        match_percentage = face_recognition.face_distance(known_face_encodings, face_encoding[0])[first_match_index] * 100
+                        match_percentage = 100 - match_percentage  # Hacer que el porcentaje sea de coincidencia
 
+                    results.append({
+                        "name": name,
+                        "location": face_rectangle,
+                        "match_percentage": match_percentage
+                    })
+        else:
+            print("Error en la detección:", response.text)
     except Exception as e:
         print("Error en la detección de rostros:", e)
 
@@ -79,14 +89,18 @@ def main():
             thread = threading.Thread(target=detect_faces, args=(frame_resized, results, known_face_encodings, known_face_names))
             thread.start()
 
-        # Dibujar los rectángulos de detección y el nombre de la persona
+        # Dibujar los rectángulos de detección y mostrar la información
         for result in results:
-            top, right, bottom, left = result["location"]
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-            cv2.putText(frame, result["name"], (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            rect = result["location"]
+            cv2.rectangle(frame, (rect['left'], rect['top']), 
+                          (rect['left'] + rect['width'], rect['top'] + rect['height']), 
+                          (0, 255, 0), 2)
+            cv2.putText(frame, f"{result['name']} - {result['match_percentage']:.2f}%", 
+                        (rect['left'], rect['top'] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                        (0, 255, 0), 2)
 
         # Mostrar el número de personas detectadas
-        cv2.putText(frame, f"Personas detectadas: {len(results)}", (10, 30),
+        cv2.putText(frame, f"Personas detectadas: {len(results)}", (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         cv2.imshow("Detección de Rostros", frame)
