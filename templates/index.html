@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Usuarios</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body class="bg-light">
-
     <div class="container mt-5">
         <h2 class="text-center mb-4">Gestión de Usuarios</h2>
 
-        <!-- Formulario para agregar usuario -->
+        <div class="text-center mb-4">
+            <button id="iniciarReconocimiento" class="btn btn-success">Iniciar Reconocimiento Facial</button>
+        </div>
+
         <div class="card p-4 mb-4">
             <h4>Agregar Usuario</h4>
             <form id="usuarioForm">
@@ -27,7 +30,6 @@
             </form>
         </div>
 
-        <!-- Tabla de usuarios -->
         <div class="card p-4">
             <h4>Lista de Usuarios</h4>
             <table class="table table-bordered table-striped">
@@ -39,30 +41,42 @@
                         <th>Acción</th>
                     </tr>
                 </thead>
-                <tbody id="usuarios">
-                    <!-- Datos se llenarán dinámicamente con JavaScript -->
-                </tbody>
+                <tbody id="usuarios"></tbody>
             </table>
         </div>
     </div>
 
     <script>
+        document.getElementById('iniciarReconocimiento').addEventListener('click', async function() {
+            try {
+                const response = await fetch('/reconocer');
+                const data = await response.json();
+    
+                Swal.fire({
+                    icon: data.status === "Autorizado" ? 'success' : 'error',
+                    title: data.status === "Autorizado" ? 'Acceso Autorizado' : 'Acceso Denegado',
+                    text: `Nombre: ${data.nombre}\nPorcentaje: ${data.match_percentage.toFixed(2)}%`,
+                    confirmButtonColor: data.status === "Autorizado" ? '#28a745' : '#dc3545'
+                });
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'No se pudo procesar la solicitud'
+                });
+            }
+        });
+
         document.getElementById('usuarioForm').addEventListener('submit', async function(event) {
             event.preventDefault();
-
             const formData = new FormData();
-            formData.append("nombre", document.getElementById("nombre").value);
-            formData.append("foto", document.getElementById("foto").files[0]);
+            formData.append('nombre', document.getElementById('nombre').value);
+            formData.append('foto', document.getElementById('foto').files[0]);
 
-            const response = await fetch('/usuarios', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (response.ok) {
-                document.getElementById('usuarioForm').reset();
-                cargarUsuarios();
-            }
+            const response = await fetch('/usuarios', { method: 'POST', body: formData });
+            const data = await response.json();
+            Swal.fire('Éxito', data.mensaje, 'success');
+            cargarUsuarios();
         });
 
         async function cargarUsuarios() {
@@ -72,28 +86,26 @@
             tbody.innerHTML = '';
 
             usuarios.forEach(usuario => {
-                const fila = `<tr>
+                const row = `<tr>
                     <td>${usuario.id}</td>
                     <td>${usuario.nombre}</td>
-                    <td><img src="${usuario.foto_url}" class="img-thumbnail" width="100"></td>
-                    <td>
-                        <button class="btn btn-danger btn-sm" onclick="eliminarUsuario(${usuario.id})">Eliminar</button>
-                    </td>
+                    <td><img src="${usuario.foto_url}" width="50" height="50"></td>
+                    <td><button class="btn btn-danger" onclick="eliminarUsuario(${usuario.id})">Eliminar</button></td>
                 </tr>`;
-                tbody.innerHTML += fila;
+                tbody.innerHTML += row;
             });
         }
 
         async function eliminarUsuario(id) {
-            if (confirm("¿Estás seguro de eliminar este usuario?")) {
-                await fetch(`/usuarios/${id}`, { method: 'DELETE' });
-                cargarUsuarios();
-            }
+            const response = await fetch(`/usuarios/${id}`, { method: 'DELETE' });
+            const data = await response.json();
+            Swal.fire('Aviso', data.mensaje, 'info');
+            cargarUsuarios();
         }
 
-        window.onload = cargarUsuarios;
+        document.addEventListener('DOMContentLoaded', cargarUsuarios);
     </script>
-
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
