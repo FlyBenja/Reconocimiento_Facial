@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import cv2
-import threading
-import time
 import face_recognition
 from conexion import obtener_conexion
 
@@ -10,6 +8,20 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = 'Data/Imagenes'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# ============================
+# 📌 FUNCIÓN PARA GENERAR NOMBRE ÚNICO
+# ============================
+def generar_nombre_unico(nombre_original):
+    nombre, extension = os.path.splitext(nombre_original)
+    contador = 1
+    nuevo_nombre = nombre_original
+
+    while os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], nuevo_nombre)):
+        nuevo_nombre = f"{nombre}_{contador}{extension}"
+        contador += 1
+
+    return nuevo_nombre
 
 # ============================
 # 📌 CARGAR ROSTROS CONOCIDOS
@@ -83,9 +95,12 @@ def agregar_usuario():
     if foto.filename == '':
         return jsonify({'error': 'No se seleccionó ninguna imagen'}), 400
 
-    ruta_foto = os.path.join(app.config['UPLOAD_FOLDER'], foto.filename)
+    # Generar un nombre único si ya existe
+    nombre_archivo = generar_nombre_unico(foto.filename)
+    ruta_foto = os.path.join(app.config['UPLOAD_FOLDER'], nombre_archivo)
     foto.save(ruta_foto)
 
+    # Guardar en la base de datos
     conexion = obtener_conexion()
     cursor = conexion.cursor()
     cursor.execute("INSERT INTO usuarios (nombre, foto_url) VALUES (%s, %s)", (nombre, ruta_foto))
@@ -114,7 +129,9 @@ def eliminar_usuario(id):
     usuario = cursor.fetchone()
 
     if usuario:
-        os.remove(usuario[0])
+        ruta_foto = usuario[0]
+        if os.path.exists(ruta_foto):  
+            os.remove(ruta_foto)  # Eliminar foto de la carpeta
         cursor.execute("DELETE FROM usuarios WHERE id = %s", (id,))
         conexion.commit()
         mensaje = "Usuario eliminado correctamente"
